@@ -47,6 +47,8 @@ from libs.create_ml_io import CreateMLReader
 from libs.create_ml_io import JSON_EXT
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
+from libs.grounding_dino_processor import GroundingDINO
+from autodistill.detection import CaptionOntology
 
 __appname__ = 'labelImg'
 
@@ -236,11 +238,13 @@ class MainWindow(QMainWindow, WindowMixin):
         open_prev_image = action(get_str('prevImg'), self.open_prev_image,
                                  'a', 'prev', get_str('prevImgDetail'))
 
-        verify = action(get_str('verifyImg'), self.verify_image,
+        verify = action(get_str('verifyImg'), self.auto_anotate,
                         'space', 'verify', get_str('verifyImgDetail'))
 
         save = action(get_str('save'), self.save_file,
                       'Ctrl+S', 'save', get_str('saveDetail'), enabled=False)
+        
+        auto_anotate = action(get_str('autoAnotate'), self.auto_anotate, 'Ctrl+A', 'auto', get_str('autoAnotateDetail'))
 
         def get_format_meta(format):
             """
@@ -389,6 +393,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               zoomActions=zoom_actions,
                               lightBrighten=light_brighten, lightDarken=light_darken, lightOrg=light_org,
                               lightActions=light_actions,
+                              autoAnotate=auto_anotate, 
                               fileMenuActions=(
                                   open, open_dir, save, save_as, close, reset_all, quit),
                               beginner=(), advanced=(),
@@ -449,7 +454,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
-            open, open_dir, change_save_dir, open_next_image, open_prev_image, verify, save, save_format, None, create, copy, delete, None,
+            auto_anotate, open, open_dir, change_save_dir, open_next_image, open_prev_image, verify, save, save_format, None, create, copy, delete, None,
             zoom_in, zoom, zoom_out, fit_window, fit_width, None,
             light_brighten, light, light_darken, light_org)
 
@@ -547,6 +552,55 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
+
+
+    def auto_anotate(self):
+        ontology_dict = {'person': 'person'}
+        self.ontology = CaptionOntology(ontology_dict)
+        self.model = GroundingDINO(ontology=self.ontology, box_threshold=0.1, text_threshold=0.1)
+        
+        res = self.model.predict(self.file_path)  # Get detected objects
+
+        bboxes = res.xyxy  # Bounding box coordinates (x_min, y_min, x_max, y_max)
+        confidences = res.confidence  # Confidence scores
+        class_ids = res.class_id  # Class IDs
+
+        shapes = []  # List to store all bounding box shapes
+
+        # Process the results and draw bounding boxes
+        for i in range(len(bboxes)):
+            confidence = confidences[i]
+
+            if confidence < 0.3:  # Ignore low-confidence detections
+                continue
+
+            class_id = class_ids[i]
+            label = "person"
+
+            x_min, y_min, x_max, y_max = bboxes[i]
+            points = [
+                QPointF(x_min, y_min), QPointF(x_max, y_min),
+                QPointF(x_max, y_max), QPointF(x_min, y_max)
+            ]
+
+            shape = Shape(label=label)
+            for point in points:
+                shape.add_point(point)
+            shape.close()
+            
+            # Assign color based on label
+            shape.line_color = generate_color_by_text(label)
+            shape.fill_color = generate_color_by_text(label)
+
+            self.add_label(shape)  # Add to UI list
+            shapes.append(shape)  # Store shape in the list
+
+        if shapes:
+            self.canvas.load_shapes(shapes)  # Load all shapes at once
+            self.set_dirty()  # Mark as modified
+            self.paint_canvas()  # Refresh canvas
+
+
 
     # Support Functions #
     def set_format(self, save_format):

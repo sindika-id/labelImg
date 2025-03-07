@@ -1,0 +1,13 @@
+pyqt5
+lxml
+numpy
+scikit-learn
+roboflow
+autodistill 
+autodistill-grounded-sam 
+autodistill-grounding-dino
+ultralytics
+
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# pyrcc5 -o libs/resources.py resources.qrc
+# python labelImg.py
