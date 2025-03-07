@@ -112,10 +112,43 @@ class MainWindow(QMainWindow, WindowMixin):
         # Load predefined classes to the list
         self.load_predefined_classes(default_prefdef_class_file)
 
+       # Ensure there is at least one predefined label
         if self.label_hist:
-            self.default_label = self.label_hist[0]
+            # Extract the first part before ':'
+            self.default_label = self.label_hist[0].split(':')[0]
         else:
             print("Not find:/data/predefined_classes.txt (optional)")
+
+        # Step 1: Dynamically generate class_id_mapping
+        self.class_id_mapping = {}
+        class_counter = 0  # Track index for mapping
+
+        clean_label_hist = []
+        ontology_dict = {}
+
+        for label in self.label_hist:
+            parts = label.split(':')
+            if len(parts) == 2:
+                key, value = parts 
+                clean_label_hist.append(key)
+                ontology_dict[value] = key
+
+                if key not in self.class_id_mapping:
+                    self.class_id_mapping[class_counter] = key 
+                    class_counter += 1 
+            else:
+                clean_label_hist.append(label)
+            
+          
+        self.ontology = CaptionOntology(ontology_dict)
+        self.model = GroundingDINO(ontology=self.ontology, box_threshold=0.1, text_threshold=0.1)
+
+        self.label_hist = clean_label_hist  
+
+        # Print to verify
+        print("Default Label:", self.default_label)
+        print("Ontology Dictionary:", ontology_dict)
+        print("Cleaned Label Hist:", self.label_hist)
 
         # Main widgets and related state.
         self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
@@ -555,9 +588,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
 
     def auto_anotate(self):
-        ontology_dict = {'person': 'person'}
-        self.ontology = CaptionOntology(ontology_dict)
-        self.model = GroundingDINO(ontology=self.ontology, box_threshold=0.1, text_threshold=0.1)
         
         res = self.model.predict(self.file_path)  # Get detected objects
 
@@ -575,7 +605,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 continue
 
             class_id = class_ids[i]
-            label = "person"
+            label_key = self.class_id_mapping.get(class_id, "unknown") 
 
             x_min, y_min, x_max, y_max = bboxes[i]
             points = [
@@ -583,14 +613,14 @@ class MainWindow(QMainWindow, WindowMixin):
                 QPointF(x_max, y_max), QPointF(x_min, y_max)
             ]
 
-            shape = Shape(label=label)
+            shape = Shape(label=label_key)
             for point in points:
                 shape.add_point(point)
             shape.close()
             
             # Assign color based on label
-            shape.line_color = generate_color_by_text(label)
-            shape.fill_color = generate_color_by_text(label)
+            shape.line_color = generate_color_by_text(label_key)
+            shape.fill_color = generate_color_by_text(label_key)
 
             self.add_label(shape)  # Add to UI list
             shapes.append(shape)  # Store shape in the list

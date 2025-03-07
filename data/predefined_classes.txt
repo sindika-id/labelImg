@@ -1,5 +1,5 @@
-person
+person:person
 vest
-no_vest
+no_vest:from neck to belly
 helmet
-no_helmet
+no_helmet:person head
