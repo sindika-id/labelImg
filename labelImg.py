@@ -48,6 +48,7 @@ from libs.create_ml_io import JSON_EXT
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
 from libs.grounding_dino_processor import GroundingDINO
+from libs.yolov11_processor import YOLOv11Processor
 from autodistill.detection import CaptionOntology
 
 __appname__ = 'labelImg'
@@ -142,6 +143,9 @@ class MainWindow(QMainWindow, WindowMixin):
           
         self.ontology = CaptionOntology(ontology_dict)
         self.model = GroundingDINO(ontology=self.ontology, box_threshold=0.1, text_threshold=0.1)
+
+        self.model_type = 'dino'
+        # self.model = YOLOv11Processor("ppe.pt")
 
         self.label_hist = clean_label_hist  
 
@@ -589,25 +593,76 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def auto_anotate(self):
         
-        res = self.model.predict(self.file_path)  # Get detected objects
+        if self.model_type == 'yolo':
+            self.auto_anotate_yolo()
+        else:
+            res = self.model.predict(self.file_path)  # Get detected objects
 
-        bboxes = res.xyxy  # Bounding box coordinates (x_min, y_min, x_max, y_max)
-        confidences = res.confidence  # Confidence scores
-        class_ids = res.class_id  # Class IDs
+            bboxes = res.xyxy  # Bounding box coordinates (x_min, y_min, x_max, y_max)
+            confidences = res.confidence  # Confidence scores
+            class_ids = res.class_id  # Class IDs
+
+            shapes = []  # List to store all bounding box shapes
+
+            # Process the results and draw bounding boxes
+            for i in range(len(bboxes)):
+                confidence = confidences[i]
+
+                if confidence < 0.3:  # Ignore low-confidence detections
+                    continue
+
+                class_id = class_ids[i]
+                label_key = self.class_id_mapping.get(class_id, "unknown") 
+
+                x_min, y_min, x_max, y_max = bboxes[i]
+                points = [
+                    QPointF(x_min, y_min), QPointF(x_max, y_min),
+                    QPointF(x_max, y_max), QPointF(x_min, y_max)
+                ]
+
+                shape = Shape(label=label_key)
+                for point in points:
+                    shape.add_point(point)
+                shape.close()
+                
+                # Assign color based on label
+                shape.line_color = generate_color_by_text(label_key)
+                shape.fill_color = generate_color_by_text(label_key)
+
+                self.add_label(shape)  # Add to UI list
+                shapes.append(shape)  # Store shape in the list
+
+            if shapes:
+                self.canvas.load_shapes(shapes)  # Load all shapes at once
+                self.set_dirty()  # Mark as modified
+                self.paint_canvas()  # Refresh canvas
+
+
+    def auto_anotate_yolo(self):
+        """
+        Automatically annotates detected objects in an image using YOLOv11.
+        """
+        if not os.path.exists(self.file_path):
+            print(f"Error: Image file '{self.file_path}' does not exist.")
+            return
+
+        parsed_detections = self.model.predict(self.file_path) 
+
+        if not parsed_detections:
+            print("No valid detections found.")
+            return
 
         shapes = []  # List to store all bounding box shapes
 
-        # Process the results and draw bounding boxes
-        for i in range(len(bboxes)):
-            confidence = confidences[i]
+        for detection in parsed_detections:
+            label_key = detection["class"]
+            confidence = detection["confidence"]
 
             if confidence < 0.3:  # Ignore low-confidence detections
-                continue
+                    continue
 
-            class_id = class_ids[i]
-            label_key = self.class_id_mapping.get(class_id, "unknown") 
+            x_min, y_min, x_max, y_max = map(float, detection["bbox"]) 
 
-            x_min, y_min, x_max, y_max = bboxes[i]
             points = [
                 QPointF(x_min, y_min), QPointF(x_max, y_min),
                 QPointF(x_max, y_max), QPointF(x_min, y_max)
@@ -617,8 +672,8 @@ class MainWindow(QMainWindow, WindowMixin):
             for point in points:
                 shape.add_point(point)
             shape.close()
-            
-            # Assign color based on label
+
+            # Assign colors based on class label
             shape.line_color = generate_color_by_text(label_key)
             shape.fill_color = generate_color_by_text(label_key)
 
